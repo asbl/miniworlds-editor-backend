@@ -139,7 +139,13 @@ def create_app(settings: Settings | None = None, enable_yearly_task: bool = True
     async def security_headers(request: Request, call_next):
         state = request.app.state
         response = None
-        if request.method in {"POST", "PUT", "PATCH", "DELETE"}:
+        version = request.headers.get("X-Miniworlds-API")
+        supported = player_api.API_MANIFEST["api"]
+        valid_version = version is None or (len(version) <= 10 and version.isascii() and version.isdecimal() and supported["min"] <= int(version) <= supported["max"])
+        if request.url.path.startswith("/api/") and not valid_version:
+            from starlette.responses import JSONResponse
+            response = JSONResponse({"detail": "Editor und Backend sind nicht kompatibel. Bitte die passende Version aktualisieren.", "api": supported}, status_code=426)
+        if response is None and request.method in {"POST", "PUT", "PATCH", "DELETE"}:
             # Klassen-/Lehreraktionen können viele Projekte betreffen. Sie
             # dürfen nicht mit Schüler-Schreibzugriffen oder Sicherungen laufen.
             if request.url.path.startswith("/api/"):
@@ -148,30 +154,21 @@ def create_app(settings: Settings | None = None, enable_yearly_task: bool = True
                 exclusive = request.url.path.startswith(("/api/teacher/", "/api/admin/")) or request.url.path in {"/api/claim", "/api/play/password"}
                 async with async_write_lock(state.settings, exclusive=exclusive):
                     response = await call_next(request)
-        else:
+        elif response is None:
             response = await call_next(request)
-        pyodide_base = state.settings.pyodide_base.rstrip("/") + "/"
+        from urllib.parse import urlsplit
+        editor = urlsplit(state.settings.editor_url)
+        editor_origin = f"{editor.scheme}://{editor.netloc}"
+        response.headers["X-Miniworlds-API"] = str(supported["max"])
         response.headers["X-Content-Type-Options"] = "nosniff"
         response.headers["X-Frame-Options"] = "DENY"
         response.headers["Referrer-Policy"] = "no-referrer"
-        response.headers[
-            "Content-Security-Policy"
-        ] = (
-            "default-src 'self'; "
-            f"script-src 'self' 'wasm-unsafe-eval' {pyodide_base}; "
-            f"connect-src 'self' {pyodide_base}; "
-            "img-src 'self' data: blob:; media-src 'self' blob:; worker-src 'self' blob:; "
-            "style-src 'self' 'unsafe-inline'; frame-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'"
+        response.headers["Content-Security-Policy"] = (
+            "default-src 'self'; script-src 'self'; connect-src 'self'; "
+            "img-src 'self' data: blob:; media-src 'self' blob:; "
+            "style-src 'self' 'unsafe-inline'; "
+            f"frame-src {editor_origin}; frame-ancestors 'none'; base-uri 'self'; form-action 'self'"
         )
-        if request.url.path == "/runner":
-            response.headers["X-Frame-Options"] = "SAMEORIGIN"
-            response.headers["Content-Security-Policy"] = (
-                "default-src 'none'; "
-                f"script-src 'self' 'unsafe-eval' 'wasm-unsafe-eval' {pyodide_base}; "
-                f"connect-src {pyodide_base}; worker-src blob:; "
-                "img-src data: blob:; media-src blob:; style-src 'unsafe-inline'; "
-                "sandbox allow-scripts; frame-ancestors 'self'; base-uri 'none'; form-action 'none'"
-            )
         response.headers["Cache-Control"] = "no-store" if request.url.path.startswith(("/api/", "/teacher", "/play", "/admin")) else "no-cache"
         if state.settings.cookie_secure:
             response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
@@ -182,5 +179,5 @@ def create_app(settings: Settings | None = None, enable_yearly_task: bool = True
     app.add_middleware(CORSMiddleware,
         allow_origins=[origin.strip() for origin in settings.frontend_origins.split(",") if origin.strip()],
         allow_credentials=False, allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE"],
-        allow_headers=["Authorization", "Content-Type"], expose_headers=["Content-Disposition"])
+        allow_headers=["Authorization", "Content-Type", "X-Miniworlds-API"], expose_headers=["Content-Disposition"])
     return app

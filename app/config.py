@@ -22,8 +22,7 @@ class Settings:
     default_quota_bytes: int = 10 * 1024 * 1024
     teacher_quota_cap: int = 50 * 1024 * 1024
     cookie_secure: bool = False  # in Produktion hinter HTTPS auf True setzen
-    miniworlds_wheel_path: str = ""  # leer = app/static/wheel/miniworlds.whl
-    pyodide_base: str = "https://cdn.jsdelivr.net/pyodide/v0.29.3/full/"
+    editor_url: str = "https://editor.opencoding.de"
     retention_read_only_months: int = 24
     retention_delete_months: int = 36
     audit_retention_days: int = 30
@@ -35,6 +34,11 @@ class Settings:
     code_readonly_days: int = 365
 
     def validate(self) -> None:
+        from urllib.parse import urlsplit
+        url = urlsplit(self.editor_url)
+        if (url.username or url.password or url.query or url.fragment or not url.hostname
+                or not (url.scheme == "https" or url.scheme == "http" and url.hostname in {"localhost", "127.0.0.1", "::1"})):
+            raise ValueError("EDITOR_URL muss eine HTTPS-Adresse (lokal auch HTTP) ohne Zugangsdaten sein.")
         if self.code_readonly_days < 1:
             raise ValueError("CODE_READONLY_DAYS muss mindestens 1 sein.")
         if not self.secret_key.strip():
@@ -63,11 +67,7 @@ def load_settings() -> Settings:
         default_quota_bytes=int(os.environ.get("DEFAULT_QUOTA_BYTES", str(10 * 1024 * 1024))),
         teacher_quota_cap=int(os.environ.get("TEACHER_QUOTA_CAP", str(50 * 1024 * 1024))),
         cookie_secure=os.environ.get("COOKIE_SECURE", "0") == "1",
-        miniworlds_wheel_path=os.environ.get(
-            "MINIWORLDS_WHEEL_PATH",
-            str(__import__("pathlib").Path(__file__).parent / "static" / "wheel" / "miniworlds.whl"),
-        ),
-        pyodide_base=os.environ.get("PYODIDE_BASE", "https://cdn.jsdelivr.net/pyodide/v0.29.3/full/"),
+        editor_url=os.environ.get("EDITOR_URL", "https://editor.opencoding.de"),
         retention_read_only_months=int(os.environ.get("RETENTION_READ_ONLY_MONTHS", "24")),
         retention_delete_months=int(os.environ.get("RETENTION_DELETE_MONTHS", "36")),
         audit_retention_days=int(os.environ.get("AUDIT_RETENTION_DAYS", "30")),

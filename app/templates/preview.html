@@ -1,0 +1,9 @@
+{% extends "base.html" %}
+{% block title %}Projektvorschau · miniworlds{% endblock %}
+{% block content %}
+<h2>Projektvorschau</h2>
+<p id="preview-status" role="status">Die Vorschau wird im Editor geladen…</p>
+<section id="preview-task"></section>
+<iframe id="editor-preview" title="Projekt im miniworlds-Editor" data-endpoint="{{ endpoint }}" src="{{ editor_url }}" allow="fullscreen" referrerpolicy="no-referrer"></iframe>
+{% endblock %}
+{% block scripts %}<script src="/static/preview.js" defer></script>{% endblock %}

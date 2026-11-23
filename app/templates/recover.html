@@ -1,0 +1,9 @@
+{% extends "base.html" %}
+{% block title %}Bisherige Entwürfe sichern · miniworlds{% endblock %}
+{% block content %}
+<h2>Bisherige Entwürfe sichern</h2>
+<p>Ungespeicherte Entwürfe der bisherigen Oberfläche liegen nur in diesem Browser-Tab. Lade sie vor dem Schließen herunter und importiere die Dateien im Editor. Die Daten bleiben hier erhalten.</p>
+<div id="legacy-drafts"></div>
+<p><a href="{{ editor_url }}">Zum Editor</a></p>
+{% endblock %}
+{% block scripts %}<script src="/static/recover.js" defer></script>{% endblock %}

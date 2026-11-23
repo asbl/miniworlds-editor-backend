@@ -176,15 +176,16 @@ def test_snapshot_ownership_and_opaque_runner_boundary(client, client2, teacher_
     p = create_project(client, teacher_csrf)[0]
     other_csrf = make_teacher(client2, email="outsider@schule.de")
     assert client2.get(f'/api/teacher/projects/{p["id"]}/snapshot').status_code == 404
-    page = client.get("/play")
-    assert "workspace.js" in page.text and "player.js" not in page.text
-    runner = client.get("/runner")
-    csp = runner.headers["content-security-policy"]
-    assert "sandbox allow-scripts;" in csp and "allow-same-origin" not in csp
-    assert "connect-src https://cdn.jsdelivr.net/pyodide/" in csp
-    assert "connect-src 'self'" not in csp
-    assert "frame-ancestors 'self'" in csp
-    assert "unsafe-eval" not in page.headers["content-security-policy"].replace("wasm-unsafe-eval", "")
+    page = client.get("/play", follow_redirects=False)
+    assert page.status_code == 307
+    assert page.headers["location"] == "https://editor.opencoding.de/?project-code=1"
+    assert client.get("/runner").status_code == 404
+    assert client.get("/static/workspace.js").status_code == 404
+    assert "unsafe-eval" not in page.headers["content-security-policy"]
+    preview = client.get(f'/player?teacher={p["id"]}')
+    assert preview.status_code == 200 and "editor-preview" in preview.text
+    assert "https://editor.opencoding.de/?embed=1" in preview.text
+    assert client2.get(f'/player?teacher={p["id"]}').status_code == 404
 
 
 def test_migration_removes_old_notes_and_preserves_projects(app, settings):

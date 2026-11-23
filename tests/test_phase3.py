@@ -7,38 +7,17 @@ from app.retention import maybe_retention
 from .conftest import auth, create_project, student_token
 
 
-# ---------- Player-Config & Wheel ----------
+# ---------- Separate frontend ----------
 
 
-def test_player_config_and_wheel(client, app, tmp_path):
-    r = client.get("/api/player/config")
-    assert r.status_code == 200
-    cfg = r.json()
-    assert cfg["wheel_url"] == "/wheel/miniworlds.whl"
-    assert cfg["pyodide_base"].startswith("https://")
-    # Wheel ist im Repo gebaut (app/static/wheel/miniworlds.whl) → 200 + ZIP-Signatur
-    r = client.get("/wheel/miniworlds.whl")
-    assert r.status_code == 200
-    assert r.content[:2] == b"PK"
+def test_player_config_points_to_editor(client, settings):
+    assert client.get("/api/player/config").json() == {"editor_url": settings.editor_url, "api_version": 1}
+    assert client.get("/wheel/miniworlds.whl").status_code == 404
 
 
-def test_wheel_404_when_missing(app, tmp_path, settings, monkeypatch):
-    # Settings mit nicht existierendem Wheel-Pfad
-    from app.config import Settings as S
-
-    s2 = S(**{**settings.__dict__, "miniworlds_wheel_path": str(tmp_path / "fehlt.whl")})
-    from app.main import create_app
-
-    app2 = create_app(s2, enable_yearly_task=False)
-    from fastapi.testclient import TestClient
-
-    with TestClient(app2) as c2:
-        assert c2.get("/wheel/miniworlds.whl").status_code == 404
-
-
-def test_player_page_renders(client):
-    r = client.get("/player")
-    assert r.status_code == 200 and "canvas" in r.text
+def test_player_without_snapshot_redirects_to_editor(client, settings):
+    r = client.get("/player", follow_redirects=False)
+    assert r.status_code == 307 and r.headers["location"] == settings.editor_url
 
 
 # ---------- Retention ----------

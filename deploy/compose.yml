@@ -19,6 +19,7 @@ x-runtime: &runtime
     MINIWORLDS_GIT_ROOT: /data/git
     COOKIE_SECURE: "1"
     BASE_URL: https://backend.editor.opencoding.de
+    EDITOR_URL: https://editor.opencoding.de
 
 services:
   backend:

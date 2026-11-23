@@ -294,7 +294,10 @@ def public_payload(slug: str, db: Session = Depends(get_db)):
     snap = _active_snapshot(db, slug)
     if not snap:
         raise HTTPException(404, "nicht verfügbar")
-    return json.loads(snap.payload) | {"slug": snap.slug, "version": snap.version}
+    from ..archives import media_name
+    payload = json.loads(snap.payload)
+    media = [{**item, "filename": item.get("filename") or media_name(item["asset_id"], item["orig_name"])} for item in payload.get("media", [])]
+    return payload | {"slug": snap.slug, "version": snap.version, "media": media}
 
 
 @router.get("/api/public/{slug}/media/{asset_id}")

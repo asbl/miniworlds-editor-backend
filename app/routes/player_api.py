@@ -1,31 +1,21 @@
-from __future__ import annotations
-
+"""Public protocol metadata; execution belongs to miniworlds-editor."""
+import json
+import os
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, HTTPException
-from fastapi.responses import FileResponse
-
-from .. import gitstore
+from fastapi import APIRouter, Depends
 from ..config import Settings
 from ..deps import get_settings
 
-router = APIRouter(tags=["player"])
+router = APIRouter(tags=["compatibility"])
+API_MANIFEST = json.loads((Path(__file__).resolve().parents[1] / "compatibility.json").read_text())
 
 
-@router.get("/wheel/miniworlds.whl", include_in_schema=False)
-def wheel(settings: Settings = Depends(get_settings)):
-    raw = settings.miniworlds_wheel_path
-    path = Path(raw) if raw else None
-    if not path or not path.is_file():
-        raise HTTPException(404, "miniworlds-Wheel nicht gebaut — siehe backend/README (pip wheel source ...)")
-    return FileResponse(path, media_type="application/octet-stream", filename="miniworlds.whl")
+@router.get("/api/compatibility")
+def compatibility():
+    return {**API_MANIFEST, "revision": os.environ.get("BACKEND_REVISION", "development")}
 
 
-@router.get("/api/player/config")
+@router.get("/api/player/config", include_in_schema=False)
 def player_config(settings: Settings = Depends(get_settings)):
-    return {
-        "pyodide_base": settings.pyodide_base.rstrip("/") + "/",
-        "wheel_url": "/wheel/miniworlds.whl",
-        "wheel_available": bool(settings.miniworlds_wheel_path and Path(settings.miniworlds_wheel_path).is_file()),
-        "git_available": gitstore.git_available(),
-    }
+    return {"editor_url": settings.editor_url, "api_version": API_MANIFEST["api"]["max"]}

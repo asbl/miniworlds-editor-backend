@@ -84,5 +84,6 @@ def test_pages_redirect_to_login(client):
     assert r.status_code in (302, 303) and "/admin/login" in r.headers["location"]
     r = client.get("/teacher", follow_redirects=False)
     assert r.status_code in (302, 303) and "/teacher/login" in r.headers["location"]
-    assert client.get("/play").status_code == 200
+    r = client.get("/play", follow_redirects=False)
+    assert r.status_code == 307 and r.headers["location"].startswith("https://editor.opencoding.de/")
     assert client.get("/healthz").json() == {"ok": True}

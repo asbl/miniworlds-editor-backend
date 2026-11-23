@@ -1,0 +1,63 @@
+name: Backend and editor compatibility
+on:
+  push:
+  pull_request:
+  schedule:
+    - cron: "37 4 * * *"
+  workflow_dispatch:
+    inputs:
+      frontend_ref:
+        description: Frontend branch, tag or commit to verify
+        default: main
+        required: false
+permissions:
+  contents: read
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - run: pip install -r requirements.txt pytest
+      - run: PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python -m pytest -q
+      - run: docker build -t miniworlds-editor-backend:test .
+      - name: Classroom administration browser test
+        run: |
+          npm install --no-save --prefix "$RUNNER_TEMP/backend-browser" playwright
+          "$RUNNER_TEMP/backend-browser/node_modules/.bin/playwright" install --with-deps chromium
+          python tests/serve_smoke.py &
+          smoke_pid=$!
+          trap 'kill "$smoke_pid" 2>/dev/null || true' EXIT
+          curl --fail --silent --retry 30 --retry-connrefused --retry-delay 1 http://127.0.0.1:8896/healthz
+          NODE_PATH="$RUNNER_TEMP/backend-browser/node_modules" node tests/browser-workflow.cjs
+  frontend-integration:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: asbl/miniworlds-editor
+          ref: ${{ inputs.frontend_ref || 'main' }}
+          path: frontend
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Check API contract and report required updates
+        run: python scripts/check_compatibility.py --frontend frontend/public/compatibility.json --backend app/compatibility.json
+      - run: pip install -r requirements.txt playwright
+      - run: playwright install --with-deps chromium
+      - run: npm ci && npm test && npm run build
+        working-directory: frontend
+      - run: python frontend/test/backend.py
+        env:
+          BACKEND_ROOT: ${{ github.workspace }}

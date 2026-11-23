@@ -1,0 +1,26 @@
+{
+  "component": "miniworlds-editor-backend",
+  "version": "1.0.0",
+  "api": {
+    "min": 1,
+    "max": 1
+  },
+  "requires": {
+    "frontend_api": {
+      "min": 1,
+      "max": 1
+    },
+    "capabilities": [
+      "read-only-preview"
+    ]
+  },
+  "capabilities": [
+    "project-files",
+    "code-passwords",
+    "snapshot-preview"
+  ],
+  "peer": {
+    "repository": "asbl/miniworlds-editor",
+    "ref": "main"
+  }
+}

@@ -1,4 +1,10 @@
 /data/
-/app/static/wheel/*.whl
 .env
 *.env
+venv/
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+*.log
+release.env

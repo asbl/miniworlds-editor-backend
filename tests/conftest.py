@@ -12,8 +12,6 @@ from app.config import Settings  # noqa: E402
 from app.main import create_app  # noqa: E402
 
 
-WHEEL = Path(__file__).resolve().parents[1] / "app" / "static" / "wheel" / "miniworlds.whl"
-
 
 @pytest.fixture()
 def settings(tmp_path):
@@ -29,7 +27,6 @@ def settings(tmp_path):
         cookie_secure=False,
         session_hours=1,
         student_token_hours=1,
-        miniworlds_wheel_path=str(WHEEL) if WHEEL.exists() else "",
     )
 
 
