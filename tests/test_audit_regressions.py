@@ -1,6 +1,5 @@
 import io
 import json
-import subprocess
 import threading
 
 from fastapi.testclient import TestClient
@@ -9,7 +8,6 @@ from app import gitstore
 from app.main import create_app
 
 from .conftest import auth, create_project, student_token
-from .test_git_remote import _make_bare, _save
 
 
 def test_request_size_limits_apply_to_headers_and_chunked_uploads(client, settings):
@@ -20,30 +18,11 @@ def test_request_size_limits_apply_to_headers_and_chunked_uploads(client, settin
     assert response.headers["X-Content-Type-Options"] == "nosniff"
 
 
-def test_remote_symlink_is_rejected_before_replacing_repository(client, teacher_csrf, settings, tmp_path):
-    project = create_project(client, teacher_csrf)[0]
-    token = student_token(client, project["code"])
-    bare = _make_bare(tmp_path)
-    assert client.put("/api/play/remote", json={"url": str(bare)}, headers=auth(token)).status_code == 200
-    _save(client, token, "safe = True\n")
-    assert client.post("/api/play/push", headers=auth(token)).status_code == 200
-    peer = tmp_path / "peer"
-    subprocess.run(["git", "clone", str(bare), str(peer)], check=True, capture_output=True)
-    subprocess.run(["git", "-C", str(peer), "config", "user.name", "Test"], check=True)
-    subprocess.run(["git", "-C", str(peer), "config", "user.email", "test@example.test"], check=True)
-    outside = tmp_path / "outside.txt"
-    outside.write_text("unchanged")
-    (peer / "main.py").unlink()
-    (peer / "main.py").symlink_to(outside)
-    subprocess.run(["git", "-C", str(peer), "add", "main.py"], check=True)
-    subprocess.run(["git", "-C", str(peer), "commit", "-m", "symlink"], check=True, capture_output=True)
-    subprocess.run(["git", "-C", str(peer), "push"], check=True, capture_output=True)
-    old_head = gitstore.head_short(settings, project["id"])
-    response = client.post("/api/play/pull?base_revision=1", headers=auth(token))
-    assert response.status_code == 502 and "Links" in response.text
-    assert gitstore.head_short(settings, project["id"]) == old_head
-    _save(client, token, "safe = 'still safe'\n")
-    assert outside.read_text() == "unchanged"
+def _save(client, token, source):
+    revision = client.get("/api/play/project", headers=auth(token)).json()["revision"]
+    response = client.put("/api/play/save", json={"source": source, "base_revision": revision}, headers=auth(token))
+    assert response.status_code == 200, response.text
+    return response.json()
 
 
 def test_existing_symlink_cannot_be_written_during_save(client, teacher_csrf, settings, tmp_path):

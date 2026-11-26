@@ -28,6 +28,7 @@
 
 <section>
   <h3>Lehrer</h3>
+  <div id="reset-code" class="code-box hidden"></div>
   <div class="table-wrap"><table id="teachers-table"><thead><tr><th>E-Mail</th><th>Schule</th><th>Projekte</th><th>Status</th><th>Aktion</th></tr></thead><tbody></tbody></table></div>
 </section>
 
@@ -35,6 +36,8 @@
   <h3>Öffentliche Aufgaben</h3>
   <ul id="public-tasks-list"></ul>
 </section>
+
+{% include "password_form.html" %}
 
 <details class="panel">
   <summary>Protokoll</summary>

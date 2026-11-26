@@ -44,16 +44,15 @@ def test_save_creates_commits_and_history(client, teacher_csrf):
 
 
 @requires_git
-def test_history_detail_shows_diff(client, teacher_csrf):
+def test_history_detail_returns_the_old_state(client, teacher_csrf):
     p = create_project(client, teacher_csrf)[0]
     token = student_token(client, p["code"])
     _save(client, token, "a = 1", "Erste Version")
     _save(client, token, "a = 2", "Zweite Version")
-    top = _history(client, token)["commits"][0]
-    r = client.get(f"/api/play/history/{top['hash']}", headers=auth(token))
+    first = _history(client, token)["commits"][1]
+    r = client.get(f"/api/play/history/{first['hash']}", headers=auth(token))
     assert r.status_code == 200, r.text
-    assert "Zweite Version" in r.json()["show"]
-    assert "-a = 1" in r.json()["show"] and "+a = 2" in r.json()["show"]
+    assert r.json()["save"]["source"] == "a = 1"
     # ungültiger Commit-Bezeichner
     assert client.get("/api/play/history/kein..commit", headers=auth(token)).status_code == 404
     # ohne Token nicht erreichbar

@@ -66,8 +66,10 @@ def _check_restored(root, secret):
         if db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='template_codes'").fetchone():
             for (code,) in db.execute("SELECT code_enc FROM template_codes"):
                 decrypt_code(code, secret)
-        for (token,) in db.execute("SELECT token_enc FROM project_remotes WHERE token_enc IS NOT NULL"):
-            decrypt_secret(token, secret)
+        # Nur Sicherungen aus älteren Versionen enthalten noch Remote-Tokens.
+        if db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='project_remotes'").fetchone():
+            for (token,) in db.execute("SELECT token_enc FROM project_remotes WHERE token_enc IS NOT NULL"):
+                decrypt_secret(token, secret)
         for pid, stored, size, checksum in db.execute("SELECT project_id, stored_name, size_bytes, sha256 FROM media_assets"):
             name = f"media/{pid}/{stored}"
             _safe_path(name)

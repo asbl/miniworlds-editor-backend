@@ -4,7 +4,6 @@ import pytest
 
 from app.audit import log_audit
 from app.config import Settings, load_settings
-from app.gitstore import GitError, validate_remote_url
 from app.models import AuditLog, Project, Snapshot, utcnow
 from app.retention import maybe_retention
 from app.yearly import get_setting
@@ -149,26 +148,3 @@ def test_legacy_audit_is_pseudonymized_and_scoped(client, teacher_csrf, app):
     assert "lehrer@schule.de" not in str(entries) and "private@example.test" not in str(entries)
 
 
-def test_git_blocks_private_dns_and_normalizes_hosts(monkeypatch):
-    from app import gitstore
-    def addresses(*args, **kwargs):
-        return [(2, 1, 6, "", ("127.0.0.1", 443))]
-    monkeypatch.setattr(gitstore.socket, "getaddrinfo", addresses)
-    for url, allowed in [
-        ("git@LOCALHOST:repo.git", "localhost"),
-        ("https://git.example.org/repo.git", "git.example.org"),
-        ("git@git.example.org:repo.git", "git.example.org"),
-        ("https://127.0.0.1/repo.git", "127.0.0.1"),
-        ("https://[::1]/repo.git", "::1"),
-    ]:
-        with pytest.raises(GitError, match="Interne/lokale"):
-            validate_remote_url(url, allowed)
-    monkeypatch.setattr(gitstore.socket, "getaddrinfo", lambda *a, **k: [(2, 1, 6, "", ("93.184.216.34", 443))])
-    assert validate_remote_url("git@GITHUB.COM:u/r.git") == "git@github.com:u/r.git"
-    with pytest.raises(GitError):
-        validate_remote_url("https://evil.github.com/u/r.git")
-    with pytest.raises(GitError):
-        validate_remote_url("https://github.com/u/r.git", "")
-    # Der Test-Schalter erlaubt lokale Dateien, aber keine internen Netzwerkziele.
-    with pytest.raises(GitError):
-        validate_remote_url("git@LOCALHOST:r.git", "local")

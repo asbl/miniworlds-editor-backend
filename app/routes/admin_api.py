@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 from ..audit import log_audit
 from ..config import Settings
 from ..deps import get_db, get_settings, require_admin, require_csrf
-from ..models import AuditLog, MediaAsset, Project, Save, Session as DbSession, Submission, SubmissionVersion, TaskAssignment, TeacherInvite, User, utcnow
+from ..models import AuditLog, MediaAsset, PasswordReset, Project, Save, Session as DbSession, Submission, SubmissionVersion, TaskAssignment, TeacherInvite, User, utcnow
 from ..security import gen_code, hash_code
 from ..services import serialize_project
 from ..yearly import get_setting, set_setting
@@ -143,6 +143,22 @@ def set_disabled(teacher_id: int, body: DisableIn, admin: User = Depends(require
     log_audit(db, "admin", f"user:{admin.id}", "teacher_disabled" if body.disabled else "teacher_enabled", target=str(teacher_id), meta={"email": u.email})
     db.commit()
     return {"ok": True, "disabled": u.disabled}
+
+
+@router.post("/teachers/{teacher_id}/reset-code")
+def create_reset_code(teacher_id: int, admin: User = Depends(require_admin), db: Session = Depends(get_db)):
+    teacher = db.get(User, teacher_id)
+    if not teacher or teacher.role != "teacher":
+        raise HTTPException(404, "Lehrer nicht gefunden")
+    if teacher.disabled:
+        raise HTTPException(409, "Der Zugang ist gesperrt. Bitte zuerst entsperren.")
+    code = gen_code(16)
+    expires_at = utcnow() + timedelta(hours=24)
+    db.query(PasswordReset).filter_by(user_id=teacher.id).delete(synchronize_session=False)
+    db.add(PasswordReset(user_id=teacher.id, code_hash=hash_code(code), expires_at=expires_at))
+    log_audit(db, "admin", f"user:{admin.id}", "password_reset_issued", target=f"user:{teacher.id}", teacher_id=teacher.id)
+    db.commit()
+    return {"code": code, "expires_at": expires_at.isoformat()}
 
 
 @router.delete("/teachers/{teacher_id}")

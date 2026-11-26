@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+{% block title %}Passwort zurücksetzen{% endblock %}
+{% block content %}
+<section class="auth-panel">
+<h2>Passwort zurücksetzen</h2>
+<p class="muted">Den Einmalcode erhältst du von der Verwaltung. Er gilt 24 Stunden.</p>
+<form id="reset-form">
+  <label>E-Mail <input type="email" name="email" required autocomplete="username"></label>
+  <label>Einmalcode <input name="code" required autocomplete="off" autocapitalize="characters" spellcheck="false"></label>
+  <label>Neues Passwort (min. 8 Zeichen) <input type="password" name="new_password" required minlength="8" autocomplete="new-password"></label>
+  <button type="submit">Passwort setzen</button>
+  <p class="error" id="err" role="alert"></p>
+</form>
+<p><a href="/teacher/login">Zur Anmeldung</a></p>
+</section>
+{% endblock %}

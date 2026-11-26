@@ -18,6 +18,8 @@ x-runtime: &runtime
     MEDIA_ROOT: /data/media
     MINIWORLDS_GIT_ROOT: /data/git
     COOKIE_SECURE: "1"
+    # Nur Traefik (privates Docker-Netz) darf die Client-Adresse per X-Forwarded-For setzen.
+    FORWARDED_ALLOW_IPS: "10.0.0.0/8,172.16.0.0/12,192.168.0.0/16"
     BASE_URL: https://backend.editor.opencoding.de
     EDITOR_URL: https://editor.opencoding.de
 

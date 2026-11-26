@@ -43,6 +43,14 @@ class Session(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
+class PasswordReset(Base):
+    """Vom Admin erzeugter Einmalcode, mit dem eine Lehrkraft ein neues Passwort setzt."""
+    __tablename__ = "password_resets"
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
+    code_hash: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
 class TeacherInvite(Base):
     __tablename__ = "teacher_invites"
     id: Mapped[int] = mapped_column(primary_key=True)
@@ -97,7 +105,6 @@ class Project(Base):
 
     teacher: Mapped[User] = relationship(back_populates="projects")
     assignments: Mapped[list["TaskAssignment"]] = relationship(cascade="all, delete-orphan")
-    remote: Mapped["ProjectRemote | None"] = relationship(uselist=False, cascade="all, delete-orphan")
 
 
 class TemplateCode(Base):
@@ -117,14 +124,6 @@ class CodeAttempt(Base):
     key: Mapped[str] = mapped_column(String(64), primary_key=True)
     failures: Mapped[int] = mapped_column(Integer, default=0)
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
-
-
-class ProjectRemote(Base):
-    __tablename__ = "project_remotes"
-    project_id: Mapped[int] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"), primary_key=True)
-    url: Mapped[str] = mapped_column(String(512))  # ohne Credentials; Token liegt verschlüsselt daneben
-    token_enc: Mapped[str | None] = mapped_column(String(1024))  # Fernet-verschlüsseltes PAT/Deploy-Token; None = ohne Auth
-    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
 class Save(Base):

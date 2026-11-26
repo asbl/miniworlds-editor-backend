@@ -20,7 +20,6 @@ def settings(tmp_path):
         database_url=f"sqlite:///{tmp_path}/test.db",
         media_root=str(tmp_path / "media"),
         git_root=str(tmp_path / "git"),
-        git_allowed_hosts="local,github.com",  # Tests dürfen lokale bare Repos als Remote nutzen
         admin_email="admin@schule.de",
         admin_password="adminpw123",
         base_url="http://test",

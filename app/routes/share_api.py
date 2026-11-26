@@ -88,6 +88,7 @@ def create_share_request(
         raise HTTPException(409, "Es liegt bereits ein offener Antrag vor")
     sr = ShareRequest(project_id=p.id, status="pending", declaration_version=_declaration_version(db, settings))
     db.add(sr)
+    db.flush()
     log_audit(db, "code", f"project:{p.id}", "share_requested", target=f"share:{sr.id}", meta={"declaration_version": sr.declaration_version})
     db.commit()
     return {"ok": True, "id": sr.id, "status": "pending", "declaration_text": DECLARATION_TEXT}

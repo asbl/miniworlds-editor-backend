@@ -10,7 +10,7 @@ from app import gitstore
 from app.backups import create_backup, restore_backup, verify_backup
 from app.config import Settings
 from app.main import create_app
-from app.models import ProjectRemote, SubmissionVersion
+from app.models import SubmissionVersion
 
 from .conftest import auth, create_project, student_token
 from .test_share import _setup
@@ -44,7 +44,6 @@ def test_class_starter_copies_content_and_tasks_without_previous_work(client, cl
     aid, item = task["assignment_id"], str(task["items"][0]["id"])
     assert client.put(f"/api/play/tasks/{aid}/answers", json={"answers": {item: {"checked": True}}}, headers=auth(token)).status_code == 200
     assert client.post(f"/api/play/tasks/{aid}/submit", headers=auth(token)).status_code == 200
-    client.put("/api/play/remote", json={"url": "/test/remote.git", "token": "must-not-copy"}, headers=auth(token))
     response = client.post("/api/teacher/projects", json={"count": 2, "course_id": new_course, "template_project_id": source["id"]}, headers=headers)
     assert response.status_code == 200, response.text
     copies = response.json()["projects"]
@@ -57,8 +56,6 @@ def test_class_starter_copies_content_and_tasks_without_previous_work(client, cl
         assert data["tasks"][0]["answers"] == {} and data["tasks"][0]["status"] == "open"
         copied_task = client.get(f"/api/teacher/tasks/{data['tasks'][0]['task_id']}").json()["task"]
         assert copied_task["course_id"] == new_course
-        with app.state.SessionLocal() as db:
-            assert db.get(ProjectRemote, copy["id"]) is None
         assert client2.get(f"/api/play/media/{data['media'][0]['id']}/file", headers=auth(copied_token)).status_code == 200
     # Kopien sind eigenständig und bleiben nach dem Löschen der Vorlage erhalten.
     client.delete(f"/api/teacher/projects/{source['id']}", headers=headers)

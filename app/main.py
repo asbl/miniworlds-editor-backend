@@ -13,14 +13,14 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from .config import Settings, load_settings
 from .db import Base, make_engine, make_session_factory
-from .models import Project, ProjectRemote, User
+from .models import Project, User
 from .migrations import migrate
 from .maintenance import run_maintenance
 from .locking import async_write_lock, storage_lock
 from .services import cleanup_orphan_snapshots
 from .request_limits import buffer_request
 from .routes import admin_api, auth_api, gallery_api, pages, play_api, player_api, share_api, teacher_api
-from .security import RateLimiter, decrypt_code, decrypt_secret, encryption_key_check, hash_password
+from .security import RateLimiter, decrypt_code, encryption_key_check, hash_password
 from .yearly import get_setting, set_setting
 
 BASE_DIR = Path(__file__).parent
@@ -36,11 +36,8 @@ def init_settings(db, settings: Settings) -> None:
         from cryptography.fernet import InvalidToken
         try:
             project = db.query(Project).first()
-            remote = db.query(ProjectRemote).filter(ProjectRemote.token_enc.is_not(None)).first()
             if project:
                 decrypt_code(project.code_enc, settings.secret_key)
-            if remote:
-                decrypt_secret(remote.token_enc, settings.secret_key)
         except InvalidToken:
             raise ValueError("SECRET_KEY kann die vorhandenen Zugangsdaten nicht entschlüsseln. Den bisherigen Schlüssel verwenden.") from None
         set_setting(db, "encryption_key_check", check)

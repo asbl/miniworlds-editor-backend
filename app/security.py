@@ -54,12 +54,8 @@ def decrypt_code(enc: str, secret: str) -> str:
     return _fernet(secret).decrypt(enc.encode()).decode()
 
 
-def encrypt_secret(value: str, secret: str) -> str:
-    """z. B. git-Remote-Tokens — at rest verschlüsselt, nie an Clients zurückgegeben."""
-    return _fernet(secret).encrypt(value.encode()).decode()
-
-
 def decrypt_secret(enc: str, secret: str) -> str:
+    """Nur noch zum Prüfen älterer Sicherungen mit Git-Remote-Tokens."""
     return _fernet(secret).decrypt(enc.encode()).decode()
 
 
@@ -118,16 +114,15 @@ class RateLimiter:
             dq.append(now)
             return True
 
-    def limited(self, key: str, limit: int, window_seconds: int) -> bool:
-        """Prüfen ohne erfolgreiche Anmeldungen als Fehlversuch zu zählen."""
-        now = time.time()
+    def forgive(self, key: str) -> None:
+        """Erfolgreiche Anmeldungen zählen nicht: den eben gebuchten Versuch zurücknehmen."""
         with self._lock:
-            dq = self._hits.get(key)
-            if not dq:
-                return False
-            while dq and now - dq[0] > window_seconds:
-                dq.popleft()
-            return len(dq) >= limit
+            if self._hits.get(key):
+                self._hits[key].pop()
+
+    def reset(self, key: str) -> None:
+        with self._lock:
+            self._hits.pop(key, None)
 
 
 rate_limiter = RateLimiter()

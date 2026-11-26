@@ -63,6 +63,7 @@
     task_created:"Aufgabe erstellt", task_updated:"Aufgabe geändert", task_deleted:"Aufgabe gelöscht", task_assigned:"Aufgabe zugewiesen", task_submitted:"Projekt abgegeben",
     task_published:"Aufgabe veröffentlicht", task_unpublished:"Aufgabe zurückgezogen", public_task_copied:"Aufgabe kopiert", public_task_hidden:"Aufgabe verborgen", public_task_unhidden:"Aufgabe eingeblendet",
     submission_reopened:"Abgabe wieder geöffnet", submission_reviewed:"Abgabestatus geändert", share_requested:"Freigabe beantragt", share_approved:"Veröffentlichung freigegeben", share_rejected:"Freigabe abgelehnt", share_revoked:"Freigabe widerrufen",
+    password_changed:"Passwort geändert", password_reset_issued:"Passwort-Code erzeugt", password_reset:"Passwort zurückgesetzt",
     git_remote_set:"Git-Verbindung gespeichert", git_remote_removed:"Git-Verbindung entfernt", git_push:"Git-Änderungen übertragen", git_pull:"Git-Änderungen geladen", git_restore:"Version wiederhergestellt", git_history_deleted:"Versionsverlauf gelöscht", git_commit_failed:"Version konnte nicht gespeichert werden",
     retention_deleted:"Projekt nach Aufbewahrungsfrist gelöscht", retention_read_only:"Projekt nach Aufbewahrungsfrist gesperrt"
   };
@@ -110,6 +111,34 @@
       }
     });
   }
+
+  /* ---------- Passwort zurücksetzen / ändern ---------- */
+  async function submitPassword(form, path, onSuccess, message) {
+    message.textContent = "";
+    const body = Object.fromEntries(new FormData(form));
+    const res = await apiJson(path, { method: "POST", body: JSON.stringify(body) });
+    if (res.status === 200) {
+      sessionStorage.setItem("csrf", res.data.csrf);
+      onSuccess();
+    } else {
+      const detail = res.data && res.data.detail;
+      message.textContent = typeof detail === "string" ? detail : "Bitte die Eingaben prüfen (neues Passwort mindestens 8 Zeichen).";
+    }
+  }
+  if (page === "reset") {
+    el("reset-form").addEventListener("submit", function (ev) {
+      ev.preventDefault();
+      submitPassword(ev.target, "/api/auth/reset", () => { location.href = "/teacher"; }, el("err"));
+    });
+  }
+  const passwordForm = el("password-form");
+  if (passwordForm) passwordForm.addEventListener("submit", function (ev) {
+    ev.preventDefault();
+    submitPassword(passwordForm, "/api/auth/password", () => {
+      passwordForm.reset();
+      el("password-status").textContent = "Passwort geändert. Andere Sitzungen wurden abgemeldet.";
+    }, el("password-status"));
+  });
 
   /* ---------- Claim ---------- */
   if (page === "claim") {
@@ -219,6 +248,18 @@
           await loadTeachers();
         });
         td.appendChild(b);
+        if (!t.disabled) {
+          const reset = document.createElement("button");
+          reset.className = "secondary";
+          reset.textContent = "Passwort-Code";
+          adminOn(reset, "click", async function () {
+            const result = await apiJson("/api/admin/teachers/" + t.id + "/reset-code", { method: "POST", body: "{}" });
+            const box = el("reset-code");
+            box.classList.remove("hidden");
+            box.textContent = t.email + ": " + result.data.code + "\nNur einmal sichtbar, 24 Stunden gültig. Einlösen unter " + location.origin + "/teacher/reset";
+          });
+          td.appendChild(reset);
+        }
         tr.appendChild(td);
         tb.appendChild(tr);
       });

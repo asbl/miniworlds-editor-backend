@@ -19,8 +19,8 @@ from ..projects import new_project, read_only_reason, require_writable, store_sa
 from ..audit import log_audit
 from ..config import Settings
 from ..deps import get_db, get_settings, get_student_project
-from ..models import MediaAsset, Project, ProjectRemote, Save, ShareRequest, Submission, SubmissionVersion, Task, TaskAssignment, TemplateCode, Workspace, CodeAttempt, aware, utcnow
-from ..security import decrypt_secret, encrypt_secret, hash_code, make_student_token, hash_password, verify_password
+from ..models import MediaAsset, Project, Save, ShareRequest, Submission, SubmissionVersion, Task, TaskAssignment, TemplateCode, Workspace, CodeAttempt, aware, utcnow
+from ..security import hash_code, make_student_token, hash_password, verify_password
 from ..storage import limit_submissions, storage_policy
 from ..editor_files import save_payload
 from ..services import (
@@ -45,14 +45,12 @@ class ClaimIn(BaseModel):
 def claim_code(body: ClaimIn, request: Request, db: Session = Depends(get_db), settings: Settings = Depends(get_settings)):
     """Schüler-Code einlösen → signiertes Bearer-Token (an Code-Hash gebunden)."""
     ip = request.client.host if request.client else "?"
-    if not request.app.state.rate_limiter.allow(f"claim-request:{ip}", 600, 60):
+    if not request.app.state.rate_limiter.allow(f"claim-request:{ip}", 3000, 60):
         raise HTTPException(429, "Zu viele Versuche")
     ch = hash_code(body.code)
     attempt = db.get(CodeAttempt, ch)
     if attempt and aware(attempt.expires_at) > utcnow() and attempt.failures >= 5:
         raise HTTPException(429, "Zu viele Fehlversuche für diesen Zugang. Bitte fünf Minuten warten.")
-    if request.app.state.rate_limiter.limited(f"claim-failed:{ip}", 20, 60):
-        raise HTTPException(429, "Zu viele ungültige Codes. Bitte eine Minute warten.")
     p = db.query(Project).filter_by(code_hash=ch).first()
     personal_code = None
     invite = db.query(TemplateCode).filter_by(code_hash=ch).first() if not p else None
@@ -82,7 +80,11 @@ def claim_code(body: ClaimIn, request: Request, db: Session = Depends(get_db), s
     valid = p is not None and (not workspace or not workspace.password_hash or verify_password(body.password, workspace.password_hash))
     if not valid:
         from datetime import timedelta
-        request.app.state.rate_limiter.allow(f"claim-failed:{ip}", 20, 60)
+        # Eine ganze Schule kann hinter einer IP sitzen: gültige Zugänge werden nie
+        # wegen der IP abgewiesen. Nur unbekannte Codes sind je IP begrenzt; falsche
+        # Passwörter zählen je Code (unten), auch wenn die IP ihr Limit erreicht hat.
+        if p is None and not request.app.state.rate_limiter.allow(f"claim-failed:{ip}", 300, 60):
+            raise HTTPException(429, "Zu viele ungültige Codes. Bitte eine Minute warten.")
         if not attempt or aware(attempt.expires_at) <= utcnow():
             if attempt:
                 db.delete(attempt)
@@ -277,7 +279,7 @@ def play_history(
     """Commits des Projekts, neueste zuerst. available=False wenn git fehlt oder es noch keinen Verlauf gibt."""
     if not gitstore.git_available():
         return {"available": False, "commits": []}
-    return {"available": True, "commits": gitstore.history(settings, p.id, max(1, min(limit, 200))),
+    return {"available": True, "commits": gitstore.history(settings, p.id, max(1, min(limit, 2000))),
             "used_bytes": gitstore.history_bytes(settings, p.id), "max_bytes": settings.history_max_bytes,
             "paused": gitstore.history_paused(settings, p.id)}
 
@@ -286,8 +288,6 @@ def play_history(
 def clear_history(base_revision: int = Query(ge=0), p: Project = Depends(get_student_project),
                   db: Session = Depends(get_db), settings: Settings = Depends(get_settings)):
     require_writable(db, p)
-    if gitstore.remote_url(settings, p.id):
-        raise HTTPException(409, "Vor dem Löschen des Verlaufs muss das Git-Remote entfernt werden. Der externe Verlauf bleibt dort erhalten.")
     locked = db.execute(update(Project).where(Project.id == p.id, Project.revision == base_revision)
                         .values(revision=Project.revision + 1).execution_options(synchronize_session=False))
     if locked.rowcount != 1:
@@ -311,11 +311,11 @@ def download_history(p: Project = Depends(get_student_project), settings: Settin
 
 @router.get("/play/history/{commit}")
 def play_history_detail(commit: str, p: Project = Depends(get_student_project), settings: Settings = Depends(get_settings)):
-    """Metadaten + Diff eines Commits."""
+    """Der Projektstand eines Commits (wie GET /play/project „save“)."""
     if not gitstore.git_available():
         raise HTTPException(503, "git ist auf dem Server nicht verfügbar")
     try:
-        return {"hash": commit, "show": gitstore.show(settings, p.id, commit)}
+        return {"hash": commit, "save": json.loads(gitstore.read_save_at(settings, p.id, commit))}
     except gitstore.GitError as error:
         raise HTTPException(404, str(error)) from None
 
@@ -351,143 +351,6 @@ def play_restore(
     log_audit(db, "code", f"project:{p.id}", "git_restore", target=commit[:8], meta={"commit": commit_hash})
     db.commit()
     return {"ok": True, "commit": commit_hash, "save": data, "revision": revision}
-
-
-# ---------- Remote (Push/Pull, z. B. GitHub) ----------
-
-
-class RemoteIn(BaseModel):
-    url: str
-    token: str | None = None  # leer = ohne Auth; wird verschlüsselt gespeichert und nie zurückgegeben
-
-
-def _remote_token(db: Session, settings: Settings, p: Project) -> str | None:
-    row = db.get(ProjectRemote, p.id)
-    if row and row.token_enc:
-        return decrypt_secret(row.token_enc, settings.secret_key)
-    return None
-
-
-def _require_configured_remote(settings: Settings, p: Project) -> None:
-    if not gitstore.remote_url(settings, p.id):
-        raise HTTPException(409, "Es ist noch kein Remote konfiguriert — zuerst Remote setzen.")
-
-
-@router.get("/play/remote")
-def play_get_remote(p: Project = Depends(get_student_project), db: Session = Depends(get_db), settings: Settings = Depends(get_settings)):
-    row = db.get(ProjectRemote, p.id)
-    url = row.url if row else gitstore.remote_url(settings, p.id)
-    return {"configured": bool(url), "url": url, "has_token": bool(row and row.token_enc)}
-
-
-@router.put("/play/remote")
-def play_put_remote(
-    body: RemoteIn,
-    request: Request,
-    p: Project = Depends(get_student_project),
-    db: Session = Depends(get_db),
-    settings: Settings = Depends(get_settings),
-):
-    require_writable(db, p)
-    if not request.app.state.rate_limiter.allow(f"remote:{p.id}", 20, 60):
-        raise HTTPException(429, "Zu viele Remote-Vorgänge")
-    try:
-        url = gitstore.validate_remote_url(body.url, settings.git_allowed_hosts)
-    except gitstore.GitError as error:
-        raise HTTPException(400, str(error)) from None
-    gitstore.set_remote(settings, p.id, url)
-    row = db.get(ProjectRemote, p.id)
-    if row is None:
-        row = ProjectRemote(project_id=p.id)
-        db.add(row)
-    row.url = url
-    row.updated_at = utcnow()
-    token = (body.token or "").strip()
-    row.token_enc = encrypt_secret(token, settings.secret_key) if token else None
-    log_audit(db, "code", f"project:{p.id}", "git_remote_set", target=f"project:{p.id}", meta={"has_token": bool(token)})
-    db.commit()
-    return {"ok": True, "url": url, "has_token": bool(token)}
-
-
-@router.delete("/play/remote")
-def play_delete_remote(
-    request: Request,
-    p: Project = Depends(get_student_project),
-    db: Session = Depends(get_db),
-    settings: Settings = Depends(get_settings),
-):
-    require_writable(db, p)
-    if not request.app.state.rate_limiter.allow(f"remote:{p.id}", 20, 60):
-        raise HTTPException(429, "Zu viele Remote-Vorgänge")
-    gitstore.remove_remote(settings, p.id)
-    row = db.get(ProjectRemote, p.id)
-    if row:
-        db.delete(row)
-    log_audit(db, "code", f"project:{p.id}", "git_remote_removed")
-    db.commit()
-    return {"ok": True}
-
-
-@router.post("/play/push")
-def play_push(
-    request: Request,
-    p: Project = Depends(get_student_project),
-    db: Session = Depends(get_db),
-    settings: Settings = Depends(get_settings),
-):
-    if not request.app.state.rate_limiter.allow(f"push:{p.id}", 20, 60):
-        raise HTTPException(429, "Zu viele Push-Vorgänge")
-    if not gitstore.git_available():
-        raise HTTPException(503, "git ist auf dem Server nicht verfügbar")
-    _require_configured_remote(settings, p)
-    row = db.get(ProjectRemote, p.id)
-    try:
-        branch = gitstore.push(settings, p.id, _remote_token(db, settings, p))
-    except gitstore.GitError as error:
-        raise HTTPException(502, str(error)) from None
-    log_audit(db, "code", f"project:{p.id}", "git_push", target=f"project:{p.id}", meta={"branch": branch})
-    db.commit()
-    return {"ok": True, "branch": branch, "url": row.url if row else gitstore.remote_url(settings, p.id)}
-
-
-@router.post("/play/pull")
-def play_pull(
-    request: Request,
-    base_revision: int | None = Query(default=None, ge=0),
-    p: Project = Depends(get_student_project),
-    db: Session = Depends(get_db),
-    settings: Settings = Depends(get_settings),
-):
-    require_writable(db, p)
-    if not request.app.state.rate_limiter.allow(f"pull:{p.id}", 20, 60):
-        raise HTTPException(429, "Zu viele Pull-Vorgänge")
-    if not gitstore.git_available():
-        raise HTTPException(503, "git ist auf dem Server nicht verfügbar")
-    _require_configured_remote(settings, p)
-    if base_revision is None:
-        raise HTTPException(428, "Bitte zuerst den aktuellen Projektstand laden")
-    old_head = gitstore.head_short(settings, p.id)
-    try:
-        new_head = gitstore.pull(settings, p.id, _remote_token(db, settings, p))
-    except gitstore.GitError as error:
-        raise HTTPException(502, str(error)) from None
-    # Save-Zeile aus dem neuen HEAD übernehmen, damit Player und git synchron bleiben
-    data = None
-    try:
-        payload = gitstore.read_save_at(settings, p.id, "HEAD")
-    except gitstore.GitError:
-        payload = None
-    if payload is not None:
-        data = json.loads(payload)
-        try:
-            store_save(db, p, payload, base_revision)
-        except HTTPException:
-            if old_head:
-                gitstore.reset_head(settings, p.id, old_head)
-            raise
-    log_audit(db, "code", f"project:{p.id}", "git_pull", meta={"commit": new_head})
-    db.commit()
-    return {"ok": True, "commit": new_head, "save": data, "revision": p.revision}
 
 
 @router.get("/play/download")

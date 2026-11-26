@@ -3,16 +3,12 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 
-DEFAULT_GIT_HOSTS = "github.com,gitlab.com,codeberg.org"
-
-
 @dataclass
 class Settings:
     secret_key: str = ""  # dauerhaft setzen; wird auch zur Verschlüsselung verwendet
     database_url: str = "sqlite:///./data/app.db"
     media_root: str = "./data/media"
     git_root: str = "./data/git"  # server-seitige git-Repos pro Projekt (Versionsverlauf)
-    git_allowed_hosts: str = DEFAULT_GIT_HOSTS  # exakte Hosts; "local" erlaubt Dateipfade nur in Tests
     admin_email: str | None = None
     admin_password: str | None = None
     base_url: str = "http://localhost:8000"
@@ -57,7 +53,6 @@ def load_settings() -> Settings:
         database_url=os.environ.get("DATABASE_URL", "sqlite:///./data/app.db"),
         media_root=os.environ.get("MEDIA_ROOT", "./data/media"),
         git_root=os.environ.get("MINIWORLDS_GIT_ROOT", "./data/git"),
-        git_allowed_hosts=os.environ.get("GIT_ALLOWED_HOSTS", DEFAULT_GIT_HOSTS),
         admin_email=os.environ.get("ADMIN_EMAIL") or None,
         admin_password=os.environ.get("ADMIN_PASSWORD") or None,
         base_url=os.environ.get("BASE_URL", "http://localhost:8000"),

@@ -51,6 +51,8 @@ def migrate(engine) -> None:
         "courses": {"archived_at": "DATETIME"},
     }
     with engine.begin() as conn:
+        # Git-Remotes wurden entfernt; gespeicherte Zugriffstokens nicht aufbewahren.
+        conn.execute(text("DROP TABLE IF EXISTS project_remotes"))
         for column in ("teacher_note", "feedback", "reviewed_at"):
             if column in {c["name"] for c in inspect(conn).get_columns("submissions")}:
                 conn.execute(text(f"ALTER TABLE submissions DROP COLUMN {column}"))

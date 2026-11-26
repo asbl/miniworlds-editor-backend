@@ -33,6 +33,20 @@ The frontend must declare `read-only-preview` before receiving files. Teacher co
 are never transferred. Configure the backend origin in the editor's `embedOrigins` and CSP
 `frame-ancestors`; configure `EDITOR_URL` and `FRONTEND_ORIGINS` on the backend.
 
+## Rate limits and passwords
+
+A whole school often shares one IP address. Only failed attempts are limited per IP (300 unknown
+codes per minute), a valid code is never refused because of the IP, and wrong project passwords
+are counted per code. The compose file trusts `X-Forwarded-For` from private networks only
+(`FORWARDED_ALLOW_IPS`). With rootless Docker the proxy may still see one address for everybody;
+the limits are chosen so that this does not block lessons.
+
+Teachers and admins change their password on their dashboard. For a forgotten teacher password,
+the admin creates a one-time code (valid 24 hours) which is redeemed at `/teacher/reset`.
+
+Git remotes (push/pull) have been removed. Starting this release drops the stored remote tokens;
+the backup taken by the rollout still contains them.
+
 ## Compatibility and updates
 
 `GET /api/compatibility` reports API ranges, required frontend capabilities and the built revision.

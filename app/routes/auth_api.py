@@ -3,14 +3,14 @@ from __future__ import annotations
 from datetime import timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from ..audit import log_audit
 from ..config import Settings
 from ..deps import get_current_user, get_db, get_settings, require_csrf
 from ..models import Session as DbSession
-from ..models import TeacherInvite, User, aware, utcnow
+from ..models import PasswordReset, TeacherInvite, User, aware, utcnow
 from ..security import (
     csrf_token,
     gen_code,
@@ -65,8 +65,9 @@ def login(body: LoginIn, request: Request, response: Response, db: Session = Dep
     ip = request.client.host if request.client else "?"
     email = body.email.strip().lower()
     rl = request.app.state.rate_limiter
-    # pro IP und pro Account limitieren (Password-Spraying erschweren)
-    if not rl.allow(f"login-ip:{ip}", 10, 900) or not rl.allow(f"login-acct:{email}", 5, 900):
+    # Fehlversuche pro IP und pro Account begrenzen (Password-Spraying erschweren).
+    # Die IP-Grenze ist großzügig, weil sich eine Schule eine IP teilen kann.
+    if not rl.allow(f"login-ip:{ip}", 100, 900) or not rl.allow(f"login-acct:{email}", 10, 900):
         raise HTTPException(429, "Zu viele Versuche — bitte später erneut versuchen")
     # abgelaufene Sessions opportunistisch aufräumen
     db.query(DbSession).filter(DbSession.expires_at < utcnow()).delete(synchronize_session=False)
@@ -78,6 +79,8 @@ def login(body: LoginIn, request: Request, response: Response, db: Session = Dep
         or user.disabled
     ):
         raise HTTPException(401, "Ungültige Zugangsdaten")
+    rl.forgive(f"login-ip:{ip}")
+    rl.forgive(f"login-acct:{email}")
     log_audit(db, user.role, f"user:{user.id}", "login", target=user.role)
     return _issue_session(response, db, settings, user)
 
@@ -92,7 +95,7 @@ class ClaimIn(BaseModel):
 def claim(body: ClaimIn, request: Request, response: Response, db: Session = Depends(get_db), settings: Settings = Depends(get_settings)):
     """Lehrer-Account per Invite-Code anlegen (kein Name, nur E-Mail + Passwort; Schule kommt aus dem Invite)."""
     ip = request.client.host if request.client else "?"
-    if not request.app.state.rate_limiter.allow(f"claim:{ip}", 20, 900):
+    if not request.app.state.rate_limiter.allow(f"claim:{ip}", 100, 900):
         raise HTTPException(429, "Zu viele Versuche — bitte später erneut versuchen")
     ch = hash_code(body.invite_code)
     if not request.app.state.rate_limiter.allow(f"claim-code:{ch[:16]}", 10, 60):
@@ -112,6 +115,7 @@ def claim(body: ClaimIn, request: Request, response: Response, db: Session = Dep
     db.flush()
     inv.claimed_at = utcnow()
     inv.claimed_by = user.id
+    request.app.state.rate_limiter.forgive(f"claim:{ip}")
     log_audit(db, "teacher", f"user:{user.id}", "claim", target=f"invite:{inv.id}", meta={"school": inv.school})
     return _issue_session(response, db, settings, user)
 
@@ -134,12 +138,72 @@ def invite_code_check(body: ClaimIn, request: Request, db: Session = Depends(get
     ip = request.client.host if request.client else "?"
     rl = request.app.state.rate_limiter
     ch = hash_code(body.invite_code)
-    if not rl.allow(f"invite-ip:{ip}", 20, 60) or not rl.allow(f"invite-code:{ch[:16]}", 10, 60):
+    if not rl.allow(f"invite-ip:{ip}", 100, 60) or not rl.allow(f"invite-code:{ch[:16]}", 10, 60):
         raise HTTPException(429, "Zu viele Versuche")
     inv = db.query(TeacherInvite).filter_by(code_hash=ch).first()
     if not inv or inv.claimed_at or (inv.expires_at and aware(inv.expires_at) < utcnow()):
         raise HTTPException(401, "Ungültiger Code")
+    rl.forgive(f"invite-ip:{ip}")
     return {"school": inv.school, "email": inv.email}
+
+
+MIN_PASSWORD = 8
+
+
+def _set_password(db: Session, user: User, password: str) -> None:
+    """Neues Passwort; alle Sitzungen und offenen Rücksetzcodes verfallen."""
+    user.pw_hash = hash_password(password)
+    db.query(DbSession).filter_by(user_id=user.id).delete(synchronize_session=False)
+    db.query(PasswordReset).filter_by(user_id=user.id).delete(synchronize_session=False)
+
+
+class PasswordChangeIn(BaseModel):
+    current_password: str = Field(max_length=256)
+    new_password: str = Field(min_length=MIN_PASSWORD, max_length=256)
+
+
+@router.post("/password", dependencies=[Depends(require_csrf)])
+def change_password(body: PasswordChangeIn, request: Request, response: Response, db: Session = Depends(get_db), settings: Settings = Depends(get_settings)):
+    user = get_current_user(request, db)
+    if not user:
+        raise HTTPException(401, "Nicht angemeldet")
+    rl = request.app.state.rate_limiter
+    if not rl.allow(f"password-change:{user.id}", 10, 900):
+        raise HTTPException(429, "Zu viele Versuche — bitte später erneut versuchen")
+    if not verify_password(body.current_password, user.pw_hash):
+        raise HTTPException(400, "Das aktuelle Passwort ist falsch")
+    rl.forgive(f"password-change:{user.id}")
+    _set_password(db, user, body.new_password)
+    log_audit(db, user.role, f"user:{user.id}", "password_changed")
+    # Die eigene Sitzung wird neu ausgestellt (Cookie und CSRF-Token ändern sich).
+    return _issue_session(response, db, settings, user)
+
+
+class PasswordResetIn(BaseModel):
+    code: str = Field(min_length=1, max_length=128)
+    email: str = Field(max_length=255)
+    new_password: str = Field(min_length=MIN_PASSWORD, max_length=256)
+
+
+@router.post("/reset")
+def reset_password(body: PasswordResetIn, request: Request, response: Response, db: Session = Depends(get_db), settings: Settings = Depends(get_settings)):
+    ip = request.client.host if request.client else "?"
+    rl = request.app.state.rate_limiter
+    if not rl.allow(f"reset:{ip}", 50, 900):
+        raise HTTPException(429, "Zu viele Versuche — bitte später erneut versuchen")
+    email = body.email.strip().lower()
+    row = db.query(PasswordReset).filter_by(code_hash=hash_code(body.code)).first()
+    user = db.get(User, row.user_id) if row else None
+    if not user or user.email != email or user.role != "teacher" or user.disabled or aware(row.expires_at) < utcnow():
+        raise HTTPException(401, "Code oder E-Mail ungültig, oder der Code ist abgelaufen")
+    # Atomar verbrauchen: zwei gleichzeitige Anfragen dürfen den Code nicht doppelt nutzen.
+    if db.query(PasswordReset).filter_by(user_id=user.id, code_hash=row.code_hash).delete(synchronize_session=False) != 1:
+        raise HTTPException(401, "Code bereits eingelöst")
+    rl.forgive(f"reset:{ip}")
+    rl.reset(f"login-acct:{email}")
+    _set_password(db, user, body.new_password)
+    log_audit(db, "teacher", f"user:{user.id}", "password_reset")
+    return _issue_session(response, db, settings, user)
 
 
 __all__ = ["router", "gen_code"]

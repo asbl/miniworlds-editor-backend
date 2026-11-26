@@ -42,6 +42,11 @@ def teacher_claim(request: Request):
     return TEMPLATES.TemplateResponse(request, "claim.html", {"page": "claim"})
 
 
+@router.get("/teacher/reset", response_class=HTMLResponse, include_in_schema=False)
+def teacher_reset(request: Request):
+    return TEMPLATES.TemplateResponse(request, "reset.html", {"page": "reset"})
+
+
 @router.get("/admin", response_class=HTMLResponse, include_in_schema=False)
 def admin_page(request: Request, db: Session = Depends(get_db)):
     user = get_current_user(request, db)

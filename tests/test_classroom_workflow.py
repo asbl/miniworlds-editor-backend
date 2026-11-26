@@ -28,8 +28,10 @@ def course(client, csrf, title="Informatik 7a"):
 def test_class_login_accepts_30_valid_codes_but_limits_failures(client, teacher_csrf):
     projects = create_project(client, teacher_csrf, count=30)
     assert all(client.post("/api/claim", json={"code": p["code"]}).status_code == 200 for p in projects)
-    assert all(client.post("/api/claim", json={"code": f"wrong-{n}"}).status_code == 401 for n in range(20))
+    assert all(client.post("/api/claim", json={"code": f"wrong-{n}"}).status_code == 401 for n in range(300))
     assert client.post("/api/claim", json={"code": "another-wrong-code"}).status_code == 429
+    # Hinter einer gemeinsamen Schul-IP bleiben gültige Codes trotzdem nutzbar.
+    assert all(client.post("/api/claim", json={"code": p["code"]}).status_code == 200 for p in projects)
 
 
 def test_two_tabs_cannot_overwrite_each_other(client, teacher_csrf):

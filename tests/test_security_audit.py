@@ -9,19 +9,19 @@ def test_invite_code_check_rate_limited(client, admin_csrf):
     r = client.post("/api/admin/invites", json={"school": "S"}, headers={"X-CSRF-Token": admin_csrf})
     code = r.json()["code"]
     last = None
-    for _ in range(25):
+    for _ in range(12):
         last = client.post("/api/auth/invite-code-check", json={"invite_code": code, "email": "", "password": ""})
     assert last.status_code == 429
 
 
 def test_login_per_account_rate_limited(client):
-    # 5 Fehlversuche für denselben Account erlaubt, dann 429 — egal welcher IP-Eindruck
+    # 10 Fehlversuche für denselben Account erlaubt, dann 429 — egal welcher IP-Eindruck
     statuses = [
         client.post("/api/auth/login", json={"email": "admin@schule.de", "password": "falsch", "role": "admin"}).status_code
-        for _ in range(6)
+        for _ in range(11)
     ]
-    assert statuses[:5] == [401] * 5
-    assert statuses[5] == 429
+    assert statuses[:10] == [401] * 10
+    assert statuses[10] == 429
 
 
 def test_expired_sessions_cleaned_on_login(client, app):

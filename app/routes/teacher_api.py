@@ -7,7 +7,6 @@ from fastapi import APIRouter, Depends, HTTPException, Response
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.orm import Session
 
-from .. import gitstore
 from ..archives import project_snapshot, project_zip, unpack_snapshot
 from ..projects import assign_templates, copy_project_content, new_project, owned_course, set_read_only
 from ..task_data import checkbox_answers
@@ -19,7 +18,6 @@ from ..models import (
     Course,
     MediaAsset,
     Project,
-    ProjectRemote,
     Save,
     ShareRequest,
     Submission,
@@ -33,7 +31,7 @@ from ..models import (
     aware,
     utcnow,
 )
-from ..security import decrypt_code, encrypt_code, encrypt_secret, gen_code, hash_code
+from ..security import decrypt_code, encrypt_code, gen_code, hash_code
 from ..storage import storage_policy
 from ..services import (
     compute_used_bytes,
@@ -343,54 +341,6 @@ def reset_student_password(pid: int, teacher: User = Depends(require_teacher), d
     workspace.password_hash = None
     workspace.credential_version += 1
     log_audit(db, "teacher", f"user:{teacher.id}", "student_password_reset", target=f"project:{pid}")
-    db.commit()
-    return {"ok": True}
-
-
-class RemoteIn(BaseModel):
-    url: str
-    token: str | None = None  # leer = ohne Auth; verschlüsselt at rest, nie zurückgegeben
-
-
-@router.get("/projects/{pid}/remote")
-def project_get_remote(pid: int, teacher: User = Depends(require_teacher), db: Session = Depends(get_db), settings: Settings = Depends(get_settings)):
-    """Remote des Projekts (URL + ob ein Token hinterlegt ist — nie das Token selbst)."""
-    p = _owned_project(db, teacher, pid)
-    row = db.get(ProjectRemote, p.id)
-    url = row.url if row else gitstore.remote_url(settings, p.id)
-    return {"configured": bool(url), "url": url, "has_token": bool(row and row.token_enc)}
-
-
-@router.put("/projects/{pid}/remote")
-def project_put_remote(pid: int, body: RemoteIn, teacher: User = Depends(require_teacher), db: Session = Depends(get_db), settings: Settings = Depends(get_settings)):
-    """Remote für ein Projekt setzen (z. B. Klassen-Repo auf GitHub mit PAT) — Schüler pushen dann per Klick."""
-    p = _owned_project(db, teacher, pid)
-    try:
-        url = gitstore.validate_remote_url(body.url, settings.git_allowed_hosts)
-    except gitstore.GitError as error:
-        raise HTTPException(400, str(error)) from None
-    gitstore.set_remote(settings, p.id, url)
-    row = db.get(ProjectRemote, p.id)
-    if row is None:
-        row = ProjectRemote(project_id=p.id)
-        db.add(row)
-    row.url = url
-    row.updated_at = utcnow()
-    token = (body.token or "").strip()
-    row.token_enc = encrypt_secret(token, settings.secret_key) if token else None
-    log_audit(db, "teacher", f"user:{teacher.id}", "git_remote_set", target=f"project:{pid}", meta={"url": url, "has_token": bool(token)})
-    db.commit()
-    return {"ok": True, "url": url, "has_token": bool(token)}
-
-
-@router.delete("/projects/{pid}/remote")
-def project_delete_remote(pid: int, teacher: User = Depends(require_teacher), db: Session = Depends(get_db), settings: Settings = Depends(get_settings)):
-    p = _owned_project(db, teacher, pid)
-    gitstore.remove_remote(settings, p.id)
-    row = db.get(ProjectRemote, p.id)
-    if row:
-        db.delete(row)
-    log_audit(db, "teacher", f"user:{teacher.id}", "git_remote_removed", target=f"project:{pid}")
     db.commit()
     return {"ok": True}
 
