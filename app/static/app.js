@@ -23,6 +23,11 @@
   async function api(path, opts) {
     opts = opts || {};
     opts.headers = Object.assign({ "Content-Type": "application/json" }, opts.headers || {});
+    // The session cookie is shared by all tabs, sessionStorage is not: fetch the current token before writing.
+    if (opts.method && opts.method !== "GET") {
+      const session = await fetch("/api/auth/session");
+      if (session.ok) sessionStorage.setItem("csrf", (await session.json()).csrf);
+    }
     if (csrf()) opts.headers["X-CSRF-Token"] = csrf();
     if (stoken() && (path.indexOf("/api/play") === 0 || path === "/api/claim")) {
       opts.headers["Authorization"] = "Bearer " + stoken();
@@ -74,8 +79,6 @@
     button.disabled = true;
     try {
       if (window.miniworldsBeforeLogout) await window.miniworldsBeforeLogout();
-      const session = await apiJson("/api/auth/session");
-      if (session.status === 200) sessionStorage.setItem("csrf", session.data.csrf);
       const result = await apiJson("/api/auth/logout", { method: "POST", body: "{}" });
       if (result.status !== 200 && result.status !== 401) throw new Error("Abmelden ist fehlgeschlagen. Bitte erneut versuchen.");
       window.dispatchEvent(new Event("miniworlds:logout"));
