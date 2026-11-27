@@ -1,0 +1,39 @@
+# Manual release of the backend: Actions -> Deploy -> Run workflow (see README)
+name: Deploy
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: deploy
+  cancel-in-progress: false
+jobs:
+  deploy:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install -r requirements.txt pytest
+      - run: PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python -m pytest -q
+      - name: Check compatibility with the live editor
+        run: python scripts/check_compatibility.py --frontend https://editor.opencoding.de/compatibility.json --backend app/compatibility.json
+      - name: Build and switch on the server
+        env:
+          SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+          SSH_USER: ${{ secrets.DEPLOY_USER }}
+          SSH_HOST: ${{ secrets.DEPLOY_HOST }}
+          SSH_PORT: ${{ secrets.DEPLOY_PORT }}
+        run: |
+          install -m 700 -d ~/.ssh
+          (umask 077; printf '%s\n' "$SSH_KEY" > ~/.ssh/deploy)
+          printf '%s\n' "$KNOWN_HOSTS" > ~/.ssh/known_hosts
+          echo "$GITHUB_SHA" | ssh -i ~/.ssh/deploy -p "$SSH_PORT" -o IdentitiesOnly=yes -o ServerAliveInterval=30 "$SSH_USER@$SSH_HOST"
+      - name: Check the live revision
+        run: |
+          curl --fail --silent --show-error --retry 10 --retry-all-errors --retry-delay 3 https://backend.editor.opencoding.de/api/compatibility |
+            python3 -c 'import json,os,sys; assert json.load(sys.stdin)["revision"] == os.environ["GITHUB_SHA"], "old revision is still running"'

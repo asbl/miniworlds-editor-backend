@@ -68,6 +68,22 @@ No cross-repository write token or mandatory backend clone is needed for normal 
 
 ## Deployment and migration
 
+### Deploy through GitHub (production)
+
+From any computer, without SSH access: *Actions → Deploy → Run workflow* on `main`, or `gh workflow run deploy.yml`.
+The workflow runs the tests and the compatibility check, then asks the server to deploy this commit. The server fetches
+it from the public repository (only commits on `main` are accepted), builds the image, makes a verified backup, switches
+`compose.json` to the new image and goes back to the previous one if it does not become healthy
+(`compose.previous.json` is kept). Other changes to `deploy/compose.yml` are not applied to the server.
+
+Setup (once): install `deploy/server/receive-backend.py` root-owned in `/usr/local/lib/miniworlds-deploy/`; give a dedicated
+user the public key with
+`restrict,command="sudo -n -H -u <docker user> /usr/local/lib/miniworlds-deploy/receive-backend.py <project folder> https://github.com/asbl/miniworlds-editor-backend.git"`,
+a sudo rule for exactly that command and, if `AllowUsers` is set, an entry there. In the GitHub environment `production`
+(branch `main` only) set `DEPLOY_SSH_KEY`, `DEPLOY_USER`, `DEPLOY_HOST`, `DEPLOY_PORT` and `DEPLOY_KNOWN_HOSTS`.
+
+### By hand over SSH (hosts with `release.env`/`compose.yml`)
+
 ```sh
 docker build -t miniworlds-backend:tested .
 DEPLOY_TARGET=user@host:/existing/backend/path scripts/deploy.sh
